@@ -1,0 +1,32 @@
+# === Environment Isolations ===
+venv/
+.venv/
+env/
+ENV/
+
+# === Project Specific MediaPipe Binaries ===
+
+mediapipe/
+
+# === Python Compilation Cache ===
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# === Operating System Overhead ===
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# === Local Configurations / Tokens ===
+.env
+*.local
+
+# === other files ===
+
+socket.io.min.js
+get_socket.py
+index0.html

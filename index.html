@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8" />
+    <title>Fox Vision Tracker</title>
+    <style>
+        
+        .video-container {
+            position: relative;
+            width: 640px;
+            height: 480px;
+            background: #000;
+        }
+        #webcam-video, #output-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 640px;
+            height: 480px;
+        }
+        #output-canvas {
+            z-index: 10;
+            pointer-events: none; 
+        }
+    </style>
+    
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
+
+    <script src="/mediapipe/face_mesh.js"></script>
+
+    <!-- <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script> -->
+</head>
+<body>
+
+    <div class="video-container">
+        <video id="webcam-video" autoplay playsinline></video>
+        <canvas id="output-canvas" width="640" height="480"></canvas>
+    </div>
+
+    <script type="module">
+        
+        const socket = io(`http://${window.location.hostname}:5050`);
+
+        const videoElement = document.getElementById('webcam-video');
+        const canvasElement = document.getElementById('output-canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+
+        const DEADBAND = 30;       
+        const SMOOTHING = 0.15;
+        
+        window.targetServoPan = 90;
+        window.targetServoTilt = 90;
+        window.currentServoPan = 90;
+        window.currentServoTilt = 90;
+        
+        // Correct initialization using the globally loaded FaceMesh class from the CDN
+        const faceMesh = new FaceMesh({
+            locateFile: (file) => {
+                return `/mediapipe/${file}`;
+                // return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
+            }
+        });
+        
+        faceMesh.setOptions({
+            maxNumFaces: 1,
+            refineLandmarks: true,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+
+        window.userAwayFrames = 0;
+        window.userWasPresent = false;
+
+        // Process webcam frames
+        faceMesh.onResults((results) => {
+            // Clear the previous frame overlay drawings
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+
+            if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+                
+                window.userAwayFrames = 0; 
+                
+                if (!window.userWasPresent) {
+                    window.userWasPresent = true;
+                    if (typeof window.sendTouchToBrain === "function") {
+                        window.sendTouchToBrain("*I just walked into the room and you noticed me.*", "Vision");
+                    }
+                }
+
+                // Extract landmarks for the primary face
+                const landmarks = results.multiFaceLandmarks[0];
+                const nose = landmarks[1]; // Tip of the nose node
+
+                
+                // Identify target boundaries from landmarks
+                let minX = 1, maxX = 0, minY = 1, maxY = 0;
+                for (let i = 0; i < landmarks.length; i++) {
+                    const pt = landmarks[i];
+                    if (pt.x < minX) minX = pt.x;
+                    if (pt.x > maxX) maxX = pt.x;
+                    if (pt.y < minY) minY = pt.y;
+                    if (pt.y > maxY) maxY = pt.y;
+                }
+
+                // Convert normalized bounds into canvas pixels
+                const boxX = minX * canvasElement.width;
+                const boxY = minY * canvasElement.height;
+                const boxWidth = (maxX - minX) * canvasElement.width;
+                const boxHeight = (maxY - minY) * canvasElement.height;
+                const padding = 15; // Box padding around face
+
+                const x = boxX - padding;
+                const y = boxY - padding;
+                const w = boxWidth + (padding * 2);
+                const h = boxHeight + (padding * 2);
+                const len = 20; // Length of corner brackets
+
+                canvasCtx.strokeStyle = '#00FF66';
+                canvasCtx.lineWidth = 2.5;
+                canvasCtx.shadowBlur = 8;
+                canvasCtx.shadowColor = '#00FF66';
+
+                // Draw corner targeting brackets around face area
+                // Top-Left Corner
+                canvasCtx.beginPath(); canvasCtx.moveTo(x + len, y); canvasCtx.lineTo(x, y); canvasCtx.lineTo(x, y + len); canvasCtx.stroke();
+                // Top-Right Corner
+                canvasCtx.beginPath(); canvasCtx.moveTo(x + w - len, y); canvasCtx.lineTo(x + w, y); canvasCtx.lineTo(x + w, y + len); canvasCtx.stroke();
+                // Bottom-Left Corner
+                canvasCtx.beginPath(); canvasCtx.moveTo(x + len, y + h); canvasCtx.lineTo(x, y + h); canvasCtx.lineTo(x, y + h - len); canvasCtx.stroke();
+                // Bottom-Right Corner
+                canvasCtx.beginPath(); canvasCtx.moveTo(x + w - len, y + h); canvasCtx.lineTo(x + w, y + h); canvasCtx.lineTo(x + w, y + h - len); canvasCtx.stroke();
+
+                // Draw technical crosshair overlay on the nose tracking bridge
+                const noseX = nose.x * canvasElement.width;
+                const noseY = nose.y * canvasElement.height;
+                canvasCtx.strokeStyle = '#00FFFF';
+                canvasCtx.shadowColor = '#00FFFF';
+                canvasCtx.lineWidth = 1.5;
+                
+                canvasCtx.beginPath(); canvasCtx.arc(noseX, noseY, 6, 0, 2 * Math.PI); canvasCtx.stroke();
+                canvasCtx.beginPath(); canvasCtx.moveTo(noseX - 12, noseY); canvasCtx.lineTo(noseX + 12, noseY); canvasCtx.stroke();
+                canvasCtx.beginPath(); canvasCtx.moveTo(noseX, noseY - 12); canvasCtx.lineTo(noseX, noseY + 12); canvasCtx.stroke();
+
+                // --- POSITION CALCULATIONS ---
+                let rawPan = Math.floor(180 - (nose.x * 180)); 
+                let rawTilt = Math.floor(nose.y * 180);
+
+                rawPan = Math.max(0, Math.min(180, rawPan));
+                rawTilt = Math.max(0, Math.min(180, rawTilt));
+
+                if (Math.abs(rawPan - window.targetServoPan) > DEADBAND) {
+                    window.targetServoPan = rawPan;
+                }
+                if (Math.abs(rawTilt - window.targetServoTilt) > DEADBAND) {
+                    window.targetServoTilt = rawTilt;
+                }
+
+                window.currentServoPan += (window.targetServoPan - window.currentServoPan) * SMOOTHING;
+                window.currentServoTilt += (window.targetServoTilt - window.currentServoTilt) * SMOOTHING;
+
+                let servoPan = Math.floor(window.currentServoPan * (2400 - 544) / 180 + 544);
+                let servoTilt = Math.floor((window.currentServoTilt - 0) * (2400 - 544) / (180 - 0) + 544);
+
+                servoPan = Math.max(500, Math.min(2400, servoPan));
+                servoTilt = Math.max(500, Math.min(2400, servoTilt));
+
+                // --- ON-SCREEN DATA HUD TEXT ---
+                canvasCtx.shadowBlur = 0; // Disable glow for crisp text
+                canvasCtx.fillStyle = '#00FF66';
+                canvasCtx.font = 'bold 12px monospace';
+                canvasCtx.fillText(`PAN:  ${servoPan}`, x + w + 8, y + 15);
+                canvasCtx.fillText(`TILT: ${servoTilt}`, x + w + 8, y + 32);
+
+                printServoTelemetry(servoPan, servoTilt);
+
+                if (socket && socket.connected) {
+                    socket.emit('neck_movement', { pan: servoPan, tilt: servoTilt });
+                }
+            }
+        });
+
+        // Throttle console tracking loops
+        let lastLogTime = 0;
+        function printServoTelemetry(pan, tilt) {
+            const now = Date.now();
+            if (now - lastLogTime > 100) { 
+                console.log(`Telemetry Output -> Pan: ${pan}us | Tilt: ${tilt}us`);
+                lastLogTime = now;
+            }
+        }
+
+        // Initialize webcam hardware components
+        async function startCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: 640, height: 480 }
+                });
+                videoElement.srcObject = stream;
+                
+                async function detectionLoop() {
+                    if (!videoElement.paused && !videoElement.ended) {
+                        // This sends the actual canvas context / video frame to the WebAssembly backend
+                        await faceMesh.send({ image: videoElement });
+                    }
+                    requestAnimationFrame(detectionLoop);
+                }
+                
+                videoElement.addEventListener('playing', () => {
+                    detectionLoop();
+                });
+            } catch (err) {
+                console.error("Camera connection dropped: ", err);
+            }
+        }
+        
+        startCamera();
+    </script>
+</body>
+</html>

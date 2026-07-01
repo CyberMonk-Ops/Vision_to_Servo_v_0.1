@@ -1,0 +1,15 @@
+# Enforce global automatic line-ending normalization
+* text=auto
+
+# Explicitly ensure source code and configuration maps use standard LF line treatments
+*.py text eol=lf
+*.js text eol=lf
+*.html text eol=lf
+*.json text eol=lf
+*.txt text eol=lf
+
+# Declare specific static formats as non-textual data vectors
+*.wasm binary
+*.data binary
+*.binarypb binary
+*.tflite binary
