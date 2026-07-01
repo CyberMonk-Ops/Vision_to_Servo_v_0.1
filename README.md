@@ -27,7 +27,7 @@ Installation & Environment Assembly
 
 Clone the project assets to your local machine:
 
-git clone [https://github.com/CyberMonk-Ops/Vision_to_Servo_v_0.1?tab=readme-ov-file](https://github.com/CyberMonk-Ops/Vision_to_Servo_v_0.1?tab=readme-ov-file)
+git clone [https://github.com/CyberMonk-Ops/Vision_to_Servo_v_0.1.git](https://github.com/CyberMonk-Ops/Vision_to_Servo_v_0.1.git)
 cd your-repository-name
 
 
